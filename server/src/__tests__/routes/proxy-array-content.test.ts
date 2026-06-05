@@ -154,4 +154,60 @@ describe('OpenAI multimodal array content', () => {
     expect(status).not.toBe(400);
     if (status === 400) throw new Error(`unexpected 400: ${JSON.stringify(body)}`);
   });
+
+  // #200: code agents (AionUI, OpenCode, Qwen Code) fail on the SECOND request
+  // of a session because their follow-up history carries shapes the strict
+  // schema rejected. Each case below is a real second-turn payload pattern.
+  describe('agent second-turn shapes (#200)', () => {
+    it('accepts Gemini-part-style content blocks without a type field', async () => {
+      const { status, body } = await request(app, 'POST', '/v1/chat/completions', {
+        messages: [
+          { role: 'user', content: [{ text: 'hi' }] },
+          { role: 'assistant', content: [{ text: 'hello!' }] },
+          { role: 'user', content: [{ text: 'ok' }] },
+        ],
+      }, authHeaders());
+      expect(status).not.toBe(400);
+      if (status === 400) throw new Error(`unexpected 400: ${JSON.stringify(body)}`);
+    });
+
+    it('accepts echoed tool_calls without type and with object arguments', async () => {
+      const { status, body } = await request(app, 'POST', '/v1/chat/completions', {
+        messages: [
+          { role: 'user', content: 'list files' },
+          {
+            role: 'assistant',
+            content: null,
+            // type dropped + arguments already parsed to an object — the way
+            // Gemini-lineage agents replay our tool_calls back at us.
+            tool_calls: [{ id: 'call_1', function: { name: 'ls', arguments: { path: '.' } } }],
+          },
+          { role: 'tool', tool_call_id: 'call_1', content: 'file1.ts' },
+          { role: 'user', content: 'thanks' },
+        ],
+      }, authHeaders());
+      expect(status).not.toBe(400);
+      if (status === 400) throw new Error(`unexpected 400: ${JSON.stringify(body)}`);
+    });
+
+    it('accepts the developer role (newer OpenAI SDK system prompt)', async () => {
+      const { status, body } = await request(app, 'POST', '/v1/chat/completions', {
+        messages: [
+          { role: 'developer', content: 'You are a coding agent.' },
+          { role: 'user', content: 'hi' },
+        ],
+      }, authHeaders());
+      expect(status).not.toBe(400);
+      if (status === 400) throw new Error(`unexpected 400: ${JSON.stringify(body)}`);
+    });
+
+    it('reports the failing path in 400 validation errors', async () => {
+      const { status, body } = await request(app, 'POST', '/v1/chat/completions', {
+        messages: [{ role: 'user', content: 42 }],
+      }, authHeaders());
+      expect(status).toBe(400);
+      // Path-qualified detail ("messages.0...") instead of a bare "Invalid input"
+      expect(body.error.message).toMatch(/messages\.0/);
+    });
+  });
 });

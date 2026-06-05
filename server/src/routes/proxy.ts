@@ -152,26 +152,45 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
 
 const MAX_RETRIES = 20;
 
+// Echo-tolerant tool calls: agents replay OUR responses back as history, and
+// not all of them preserve the strict OpenAI shape. `type` may be dropped
+// (re-added on forward), and Gemini-lineage agents (Qwen Code, AionUI) often
+// send `arguments` as a parsed object instead of a JSON string — both get
+// normalized below rather than 400-ing the whole session. (#200)
 const toolCallSchema = z.object({
   id: z.string().min(1),
-  type: z.literal('function'),
+  type: z.literal('function').optional(),
   function: z.object({
     name: z.string().min(1),
-    arguments: z.string(),
+    arguments: z.union([z.string(), z.record(z.string(), z.unknown())]),
   }),
   thought_signature: z.string().optional(),
 });
 
+const toolCallArgsToString = (args: string | Record<string, unknown>): string =>
+  typeof args === 'string' ? args : JSON.stringify(args);
+
 // OpenAI multimodal envelope. Clients like opencode / continue.dev send
-// content as an array of typed blocks even when only text is present. We
-// accept the envelope on the wire and flatten to string for providers that
-// don't support arrays (Cohere, Cloudflare). Non-text blocks pass z validation
-// but get dropped by contentToString — vision/audio still isn't supported.
-const contentBlockSchema = z.object({ type: z.string() }).passthrough();
+// content as an array of typed blocks even when only text is present, and
+// Gemini-lineage agents send part-style blocks like `{ "text": "..." }` with
+// no `type` at all. Accept any object (or bare string) as a block; flatten to
+// string for providers that don't support arrays (Cohere, Cloudflare).
+// Non-text blocks pass z validation but get dropped by contentToString —
+// vision/audio still isn't supported. (#200)
+const contentBlockSchema = z.union([z.string(), z.record(z.string(), z.unknown())]);
 const contentSchema = z.union([z.string(), z.array(contentBlockSchema)]);
 
 const systemMessageSchema = z.object({
   role: z.literal('system'),
+  content: contentSchema,
+  name: z.string().optional(),
+});
+
+// OpenAI's newer SDKs send the system prompt as role:"developer"; accept it
+// and forward as "system" — none of the routed providers know the developer
+// role. (#200)
+const developerMessageSchema = z.object({
+  role: z.literal('developer'),
   content: contentSchema,
   name: z.string().optional(),
 });
@@ -225,6 +244,7 @@ const toolChoiceSchema = z.union([
 const chatCompletionSchema = z.object({
   messages: z.array(z.union([
     systemMessageSchema,
+    developerMessageSchema,
     userMessageSchema,
     assistantMessageSchema,
     toolMessageSchema,
@@ -345,9 +365,17 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // Validate request
   const parsed = chatCompletionSchema.safeParse(req.body);
   if (!parsed.success) {
+    // Path-qualified issues ("messages.1.content: Invalid input" beats a bare
+    // "Invalid input") and a server-side breadcrumb — these rejections never
+    // reach the request log, which made #200 nearly undebuggable.
+    const detail = parsed.error.errors
+      .map(e => (e.path.length ? `${e.path.join('.')}: ${e.message}` : e.message))
+      .slice(0, 5)
+      .join(', ');
+    console.warn(`[proxy] 400 invalid /chat/completions request: ${detail}`);
     res.status(400).json({
       error: {
-        message: `Invalid request: ${parsed.error.errors.map(e => e.message).join(', ')}`,
+        message: `Invalid request: ${detail}`,
         type: 'invalid_request_error',
       },
     });
@@ -373,8 +401,10 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         ...(m.name ? { name: m.name } : {}),
         ...(m.tool_calls ? { tool_calls: m.tool_calls.map(tc => ({
           id: tc.id,
-          type: tc.type,
-          function: tc.function,
+          // Normalize echo-tolerant inputs back to the strict OpenAI shape
+          // before forwarding (see toolCallSchema). (#200)
+          type: 'function' as const,
+          function: { name: tc.function.name, arguments: toolCallArgsToString(tc.function.arguments) },
           thought_signature: tc.thought_signature,
         })) } : {}),
       };
@@ -390,7 +420,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     }
 
     return {
-      role: m.role,
+      // 'developer' is OpenAI's newer name for the system role — providers
+      // downstream only know 'system'. (#200)
+      role: m.role === 'developer' ? 'system' : m.role,
       content: m.content,
       ...(m.name ? { name: m.name } : {}),
     };
