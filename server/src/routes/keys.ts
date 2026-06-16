@@ -218,7 +218,7 @@ keysRouter.post('/custom', (req: Request, res: Response) => {
         db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)').run(modelRow.id, max.m + 1);
       }
 
-      registered.push({ modelDbId: modelRow.id, model: modelId, displayName });
+      registered.push({ modelDbId: modelRow.id, model: scopedModelId, displayName });
     }
 
     return { keyId, registered };
