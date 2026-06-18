@@ -37,6 +37,9 @@ export function migrateDbSchema(db: Database.Database) {
   // V27 (June 2026): seed AGNES AI baseline model so the platform is usable
   // out of the box. Future AGNES model updates ship via catalog-sync.
   migrateModelsV27Agnes(db);
+  // V28 (June 2026): introduce `models.source` to distinguish the three write
+  // paths (migration / catalog / user). Idempotent ALTER; safe on every run.
+  ensureModelsSourceColumn(db);
   // After all model migrations: add/refresh paid-equivalent pricing
   // shipped (June 2026), model/limit DATA is maintained in the published
   // catalog (served signed by the catalog service) and reaches installs via
@@ -238,6 +241,23 @@ function ensureModelsKeyIdColumn(db: Database.Database) {
          SET key_id = (SELECT id FROM api_keys WHERE platform = 'custom' ORDER BY id LIMIT 1)
        WHERE platform = 'custom' AND key_id IS NULL
     `).run();
+  }
+}
+
+// `source` records which write path produced a models row:
+//   'migration' — seeded by migrateModelsVN(db) at startup (factory baseline)
+//   'catalog'   — written/updated by applyCatalog(db, catalog)
+//   'user'      — added by maintainer through POST /api/models
+// Drives two divergent behaviors on the read side: catalog-sync excludes
+// source='user' rows from its delete-candidate list, and DELETE /api/models/:id
+// hard-deletes only source='user' rows (others are toggled via PATCH enabled).
+// Existing rows (catalog or migration) are backfilled to 'migration' here; on
+// the first applyCatalog after upgrade, catalog-managed rows update themselves
+// to 'catalog' through the normal UPDATE path.
+function ensureModelsSourceColumn(db: Database.Database) {
+  const columns = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
+  if (!columns.some(col => col.name === 'source')) {
+    db.prepare(`ALTER TABLE models ADD COLUMN source TEXT NOT NULL DEFAULT 'migration'`).run();
   }
 }
 

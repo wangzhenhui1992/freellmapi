@@ -139,6 +139,9 @@ function isCatalog(value: unknown): value is Catalog {
  *    enabled=true never re-enables a model the user turned off themselves;
  *  - models the user added via custom providers (platform='custom' or bound to
  *    a key) are never touched;
+ *  - user-added models (source='user' via POST /api/models) are never deleted
+ *    by sync; they upgrade to source='catalog' on first catalog hit, with their
+ *    enabled flag preserved under the same enable-semantics rule above;
  *  - models that vanished from the catalog are deleted, exactly like the
  *    dead-model migrations do (fallback_config row first, FK order).
  */
@@ -152,16 +155,17 @@ export function applyCatalog(db: DatabaseType.Database, catalog: Catalog): NonNu
       size_label = @sizeLabel, rpm_limit = @rpm, rpd_limit = @rpd, tpm_limit = @tpm, tpd_limit = @tpd,
       monthly_token_budget = @monthlyTokenBudget, context_window = @contextWindow,
       supports_vision = @supportsVision, supports_tools = @supportsTools,
-      enabled = @enabled
+      enabled = @enabled,
+      source = 'catalog'
     WHERE id = @id
   `);
   const insertModel = db.prepare(`
     INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
                         rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window,
-                        enabled, supports_vision, supports_tools)
+                        enabled, supports_vision, supports_tools, source)
     VALUES (@platform, @modelId, @displayName, @intelligenceRank, @speedRank, @sizeLabel,
             @rpm, @rpd, @tpm, @tpd, @monthlyTokenBudget, @contextWindow,
-            @enabled, @supportsVision, @supportsTools)
+            @enabled, @supportsVision, @supportsTools, 'catalog')
   `);
 
   const apply = db.transaction(() => {
@@ -221,7 +225,7 @@ export function applyCatalog(db: DatabaseType.Database, catalog: Catalog): NonNu
     // once it ships its first model for that platform.
     const catalogPlatforms = new Set(catalog.models.map(m => m.platform));
     const candidates = db
-      .prepare(`SELECT id, platform, model_id FROM models WHERE platform != 'custom' AND key_id IS NULL`)
+      .prepare(`SELECT id, platform, model_id FROM models WHERE platform != 'custom' AND key_id IS NULL AND source != 'user'`)
       .all() as { id: number; platform: string; model_id: string }[];
     const deleteFb = db.prepare('DELETE FROM fallback_config WHERE model_db_id = ?');
     const deleteModel = db.prepare('DELETE FROM models WHERE id = ?');

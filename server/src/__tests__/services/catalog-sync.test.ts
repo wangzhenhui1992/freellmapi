@@ -177,6 +177,99 @@ describe('applyCatalog', () => {
   });
 });
 
+// User-added models (source='user' via POST /api/models) live alongside catalog
+// rows in the same table. These tests pin the contract: sync never deletes them,
+// catalog can take them over by upgrading their source to 'catalog', and the
+// existing enable/disable rules from the parent describe still apply.
+describe('applyCatalog × source=user', () => {
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    initDb(':memory:');
+  });
+
+  function insertUserModel(platform: string, modelId: string, enabled: 0 | 1 = 1): number {
+    const info = getDb()
+      .prepare(
+        `INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
+                             monthly_token_budget, enabled, source)
+         VALUES (?, ?, ?, 50, 50, 'User', '', ?, 'user')`,
+      )
+      .run(platform, modelId, modelId, enabled);
+    const modelId_db = Number(info.lastInsertRowid);
+    const maxPriority = (getDb().prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+    getDb().prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)').run(modelId_db, maxPriority + 1);
+    return modelId_db;
+  }
+
+  it('(a) keeps user model when catalog does not contain the same modelId', () => {
+    const userId = insertUserModel('groq', 'user-only-model-a');
+
+    // existingAsCatalogModels() snapshots the WHOLE table (including user rows
+    // that just landed) — strip the user row to simulate "catalog does not
+    // contain it".
+    const models = existingAsCatalogModels().filter(
+      (m) => !(m.platform === 'groq' && m.modelId === 'user-only-model-a'),
+    );
+    applyCatalog(getDb(), catalogOf(models));
+
+    const row = getDb()
+      .prepare("SELECT id, source, enabled FROM models WHERE platform = 'groq' AND model_id = 'user-only-model-a'")
+      .get() as { id: number; source: string; enabled: number } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.id).toBe(userId);
+    expect(row!.source).toBe('user'); // still tagged user — not visited by catalog
+    expect(row!.enabled).toBe(1);
+    const fb = getDb().prepare('SELECT id FROM fallback_config WHERE model_db_id = ?').get(userId);
+    expect(fb).toBeTruthy();
+  });
+
+  it('(b) catalog hit on a user model upgrades source to catalog and preserves enabled', () => {
+    const userId = insertUserModel('groq', 'user-then-catalog-b', 1);
+
+    const models = existingAsCatalogModels();
+    models.push(baseModel({ modelId: 'user-then-catalog-b', displayName: 'Catalog Display' }));
+    applyCatalog(getDb(), catalogOf(models));
+
+    const row = getDb()
+      .prepare("SELECT id, source, enabled, display_name FROM models WHERE platform = 'groq' AND model_id = 'user-then-catalog-b'")
+      .get() as { id: number; source: string; enabled: number; display_name: string };
+    expect(row.id).toBe(userId);
+    expect(row.source).toBe('catalog'); // upgraded by sync UPDATE
+    expect(row.enabled).toBe(1); // preserved
+    expect(row.display_name).toBe('Catalog Display'); // metadata tracks catalog
+  });
+
+  it('(c) catalog enabled=true does NOT revive a user-disabled model on takeover', () => {
+    const userId = insertUserModel('groq', 'user-disabled-c', 0);
+
+    const models = existingAsCatalogModels();
+    models.push(baseModel({ modelId: 'user-disabled-c', enabled: true }));
+    applyCatalog(getDb(), catalogOf(models));
+
+    const row = getDb()
+      .prepare("SELECT id, source, enabled FROM models WHERE platform = 'groq' AND model_id = 'user-disabled-c'")
+      .get() as { id: number; source: string; enabled: number };
+    expect(row.id).toBe(userId);
+    expect(row.source).toBe('catalog');
+    expect(row.enabled).toBe(0); // user disable wins
+  });
+
+  it('(d) catalog enabled=false force-disables even a user-enabled model on takeover', () => {
+    const userId = insertUserModel('groq', 'user-enabled-d', 1);
+
+    const models = existingAsCatalogModels();
+    models.push(baseModel({ modelId: 'user-enabled-d', enabled: false }));
+    applyCatalog(getDb(), catalogOf(models));
+
+    const row = getDb()
+      .prepare("SELECT id, source, enabled FROM models WHERE platform = 'groq' AND model_id = 'user-enabled-d'")
+      .get() as { id: number; source: string; enabled: number };
+    expect(row.id).toBe(userId);
+    expect(row.source).toBe('catalog');
+    expect(row.enabled).toBe(0); // catalog dead-upstream signal wins
+  });
+});
+
 // reapplyCachedCatalog keeps the catalog authoritative across restarts:
 // migrations re-assert the bundled baseline on every boot (INSERT OR IGNORE
 // re-adds catalog-deleted models, family rules reset flags) while the boot

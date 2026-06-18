@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/page-header'
 import type { ApiKey, Platform } from '../../../shared/types'
-import { Pencil, ExternalLink, Globe, Download, Upload } from 'lucide-react'
+import { Pencil, ExternalLink, Globe, Download, Upload, Settings2 } from 'lucide-react'
 import { formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
+import { ManageModelsDrawer } from './components/ManageModelsDrawer'
 
 // Small "Get API key" external link shown next to a provider (#137).
 function GetKeyLink({ url }: { url: string }) {
@@ -387,6 +388,10 @@ export default function KeysPage() {
   const [editingLabel, setEditingLabel] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [importing, setImporting] = useState(false)
+  // Single Drawer instance: both entry points (provider header + each KeyCard)
+  // open the same component, scoped by platform — see Task 6.5 / spec
+  // "KeysPage 提供两处对等的'管理模型'入口".
+  const [drawerPlatform, setDrawerPlatform] = useState<Platform | null>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -704,6 +709,17 @@ export default function KeysPage() {
                         </div>
                       )}
                       <GetKeyLink url={group.url} />
+                      {group.value !== 'custom' && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => setDrawerPlatform(group.value)}
+                        >
+                          <Settings2 className="size-3 mr-1" />
+                          {t('models.manage')}
+                        </Button>
+                      )}
                     </div>
                     <span className="text-xs text-muted-foreground tabular-nums">
                       {t(group.keys.length === 1 ? 'keys.keyCountOne' : 'keys.keyCountOther', { count: group.keys.length })}
@@ -769,6 +785,17 @@ export default function KeysPage() {
                           >
                             {confirmDeleteId === k.id ? t('keys.confirmRemove') : t('common.remove')}
                           </Button>
+                          {group.value !== 'custom' && (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => setDrawerPlatform(group.value)}
+                              aria-label={t('models.manage')}
+                            >
+                              <Settings2 className="size-3" />
+                            </Button>
+                          )}
                         </div>
                       )
                     })}
@@ -779,6 +806,16 @@ export default function KeysPage() {
           )}
         </section>
       </div>
+      <ManageModelsDrawer
+        open={drawerPlatform !== null}
+        onClose={() => setDrawerPlatform(null)}
+        platform={(drawerPlatform ?? 'groq') as Platform}
+        platformLabel={
+          drawerPlatform
+            ? [...PLATFORMS, CUSTOM_GROUP].find(p => p.value === drawerPlatform)?.label ?? drawerPlatform
+            : ''
+        }
+      />
     </div>
   )
 }

@@ -299,4 +299,34 @@ describe('Migration idempotency', () => {
     const missing = platforms.filter(p => !hasProvider(p));
     expect(missing).toEqual([]);
   });
+
+  it('V28: ensureModelsSourceColumn is idempotent across re-init on the same DB file', () => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    const tmpPath = `/tmp/freeapi-source-idem-${Date.now()}.db`;
+
+    const db1 = initDb(tmpPath);
+    const cols1 = (db1.prepare('PRAGMA table_info(models)').all() as { name: string }[]).map(c => c.name);
+    expect(cols1).toContain('source');
+    db1.close();
+
+    // Second init must not duplicate the column or fail.
+    const db2 = initDb(tmpPath);
+    const cols2 = (db2.prepare('PRAGMA table_info(models)').all() as { name: string }[]).map(c => c.name);
+    expect(cols2.filter(n => n === 'source')).toEqual(['source']);
+    db2.close();
+  });
+
+  it('V28: existing rows backfill source to "migration" by default', () => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    const db = initDb(':memory:');
+    // Every seeded migration row should have source='migration'.
+    const nonMigration = db.prepare(
+      `SELECT COUNT(*) AS c FROM models WHERE source != 'migration'`
+    ).get() as { c: number };
+    expect(nonMigration.c).toBe(0);
+    // And the count of source='migration' rows equals the total models row count.
+    const total = (db.prepare(`SELECT COUNT(*) AS c FROM models`).get() as { c: number }).c;
+    const tagged = (db.prepare(`SELECT COUNT(*) AS c FROM models WHERE source = 'migration'`).get() as { c: number }).c;
+    expect(tagged).toBe(total);
+  });
 });

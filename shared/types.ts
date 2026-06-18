@@ -58,6 +58,12 @@ export interface Model {
   enabled: boolean;
   supportsVision: boolean;
   supportsTools: boolean;
+  // Which write path produced this row:
+  //   'migration' — seeded by migrateModelsVN() at startup
+  //   'catalog'   — written by applyCatalog() (signed remote sync)
+  //   'user'      — added by maintainer through POST /api/models
+  // Drives UI delete-vs-disable affordance and catalog-sync's preserve filter.
+  source: 'migration' | 'catalog' | 'user';
 }
 
 // ---- Quirks ----

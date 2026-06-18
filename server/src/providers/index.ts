@@ -203,11 +203,9 @@ register(new OpenAICompatProvider({
 // before 429s (no documented RPM/RPD). Free key from platform.agnes-ai.com,
 // no card. Catalog rows live in the catalog (premium → age into free); not
 // shipped as freeapi model migrations.
-register(new OpenAICompatProvider({
-  platform: 'agnes',
-  name: 'Agnes AI',
-  baseUrl: 'https://apihub.agnes-ai.com/v1',
-}));
+// (Note: agnes is registered once at the top of this file; the duplicate
+// register that previously lived here was redundant — Map's later-write-wins
+// behavior made it harmless but it was dead code.)
 
 // Chutes was evaluated for V11 and dropped: probe with a free-tier key
 // returned 402 on every model — "Quota exceeded and account balance is
