@@ -253,6 +253,15 @@ export function getAllProviders(): BaseProvider[] {
   return Array.from(providers.values());
 }
 
+/** Return every registered platform id so MCP tool schemas can enumerate
+ *  the valid values dynamically. Includes `custom` — the platform is always
+ *  resolvable even though it has no singleton in the providers map. */
+export function getAvailablePlatforms(): Platform[] {
+  const keys = Array.from(providers.keys());
+  if (!keys.includes('custom')) keys.push('custom');
+  return keys;
+}
+
 export function hasProvider(platform: Platform): boolean {
   return providers.has(platform);
 }

@@ -33,6 +33,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV MCP_PORT=4001
 
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
@@ -45,7 +46,7 @@ RUN mkdir -p /app/server/data && chown -R node:node /app/server/data
 
 USER node
 
-EXPOSE 3001
+EXPOSE 3001 4001
 VOLUME ["/app/server/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

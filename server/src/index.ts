@@ -4,6 +4,7 @@ import { initDb, getSetting } from './db/index.js';
 import { startHealthChecker } from './services/health.js';
 import { applyProxyUrl, applyProxyEnabled, applyProxyBypass } from './lib/proxy.js';
 import { startCatalogSync } from './services/catalog-sync.js';
+import { startMcpServer } from './mcp/index.js';
 
 const PORT = process.env.PORT ?? 3001;
 // Dual-stack ('::') by default so the dashboard is reachable over both IPv4
@@ -21,6 +22,9 @@ async function main() {
   applyProxyBypass(getSetting('proxy_bypass') ?? '');
 
   const app = createApp();
+
+  // MCP management server — starts only when MCP_TOKEN is configured
+  await startMcpServer();
 
   const onReady = (host: string) => () => {
     const display = host.includes(':') ? `[${host}]` : host;
