@@ -706,6 +706,8 @@ export default function KeysPage() {
           )}
         </section>
 
+        <CustomProviderSection />
+
         <section>
           <h2 className="text-sm font-medium mb-3">{t('keys.configuredProviders')}</h2>
           {isLoading ? (
@@ -853,12 +855,6 @@ export default function KeysPage() {
             </div>
           )}
         </section>
-
-        {/* Always-visible "create custom key" form. Shown after every group so
-            new users with no keys still see the form, and users with custom
-            endpoints can add another endpoint without scrolling.
-            (#custom-platform-model-management) */}
-        <CustomProviderSection />
       </div>
       {drawerState === null ? (
         <ManageModelsDrawer open={false} onClose={() => setDrawerState(null)} />
