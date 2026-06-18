@@ -163,10 +163,10 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ env.SSH_HOST }}
-          username: ${{ env.SSH_USERNAME }}
+          host: ${{ var.SSH_HOST }}
+          username: ${{ var.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ env.SSH_PORT || 22 }}
+          port: ${{ var.SSH_PORT || 22 }}
           script: |
             cd /root/freellmapi-wzh
             git pull origin main
