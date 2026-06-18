@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
@@ -87,13 +88,25 @@ export function createApp() {
   // Error handler (for API routes)
   app.use(errorHandler);
 
+  // Compress responses (gzip/brotli) — especially the 1+ MB SPA bundles
+  app.use(compression());
+
   // Serve client static files (after API error handler). CLIENT_DIST lets
   // embedders relocate the built dashboard (e.g. the desktop app ships it in
   // extraResources, where the __dirname-relative path can't reach).
   const clientDist = process.env.CLIENT_DIST
     ? path.resolve(process.env.CLIENT_DIST)
     : path.resolve(__dirname, '../../client/dist');
-  app.use(express.static(clientDist));
+  app.use(
+    express.static(clientDist, {
+      setHeaders(res, filePath) {
+        // Hashed assets are immutable — the hash changes when content changes
+        if (/[/\\]index-[A-Za-z0-9_-]{8,}\.(js|css)(\.map)?$/.test(filePath)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }),
+  );
   // SPA fallback — serve index.html for non-API routes
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
